@@ -8,20 +8,29 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+
+builder.Services.AddSingleton(new DiagnosticsConfig());
+builder.Services
+    .ConfigureOpenTelemetryTracerProvider((sp, tracerProviderBuilder) =>
+        tracerProviderBuilder.AddSource(
+            sp.GetRequiredService<DiagnosticsConfig>().ActivitySource.Name
+        ))
+    .ConfigureOpenTelemetryMeterProvider((sp, meterProviderBuilder) =>
+        meterProviderBuilder.AddMeter(
+            sp.GetRequiredService<DiagnosticsConfig>().Meter.Name
+        ));
+;
+
 builder.Services.AddOpenTelemetry()
-    .WithTracing(tracerProviderBuilder => 
+    .ConfigureResource(resource =>
+        resource.AddService(DiagnosticsConfig.ServiceName))
+    .WithTracing(tracerProviderBuilder =>
         tracerProviderBuilder
-            .AddSource(DiagnosticsConfig.ActivitySource.Name)
-            .ConfigureResource(resource => resource
-                .AddService(DiagnosticsConfig.ServiceName))
             .AddAspNetCoreInstrumentation()
             .AddOtlpExporter()
             .AddConsoleExporter())
-    .WithMetrics(metricsProviderBuilder => 
+    .WithMetrics(metricsProviderBuilder =>
         metricsProviderBuilder
-            .AddMeter(DiagnosticsConfig.Meter.Name)
-            .ConfigureResource(resource => resource
-                .AddService(DiagnosticsConfig.ServiceName))
             .AddAspNetCoreInstrumentation()
             .AddOtlpExporter()
             .AddConsoleExporter());
@@ -49,12 +58,18 @@ app.MapControllerRoute(
 
 app.Run();
 
-public static class DiagnosticsConfig
+public class DiagnosticsConfig
 {
+    private readonly Lazy<Counter<long>> _requestCounter = null!;
+
     public const string ServiceName = "MyService";
-    public static ActivitySource ActivitySource = new(ServiceName);
-    public static Meter Meter = new(ServiceName);
-    public static Counter<long> RequestCounter = 
-        Meter.CreateCounter<long>("app.request_counter");
-    
+    public ActivitySource ActivitySource = new(ServiceName);
+    public Meter Meter = new(ServiceName);
+    public Counter<long> RequestCounter => _requestCounter.Value;
+
+    public DiagnosticsConfig()
+    { 
+        _requestCounter = new Lazy<Counter<long>>(() => 
+            Meter.CreateCounter<long>("app.request_counter")); 
+    }  
 }
